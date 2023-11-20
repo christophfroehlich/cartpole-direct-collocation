@@ -8,13 +8,16 @@ import pandas as pd
 # Define the dynamics of the cartpole system
 def dynamics(x, u):
     dx = np.zeros_like(x)
-    q2 = x[:,1]
-    q2_d = x[:,3]
-    U = np.append(u, 0)
+    theta = x[:,1]
+    theta_p = x[:,3]
+    fe = np.append(u, 0)
+    s_p = x[:,2]
     dx[:,0] = x[:,2]
     dx[:,1] = x[:,3]
-    dx[:,2] = ((l*m2*np.sin(q2)*q2_d**2)+U+(m2*g*np.cos(q2)*np.sin(q2)))/(m1 + m2*(1-(np.cos(q2))**2))
-    dx[:,3] = -((l*m2*np.cos(q2)*np.sin(q2)*q2_d**2)+(U*np.cos(q2)) + ((m1+m2)*g*np.sin(q2)))/(l*m1 + l*m2*(1-(np.cos(q2))**2))
+    dx[:,2] = 0.1e1 / (-np.cos(theta) ** 2 * lS ** 2 * mS ** 2 + lS ** 2 * mS ** 2 + lS ** 2 * mS * mW + 4 * IzzS * mS + 4 * IzzS * mW) * (np.sin(theta) * lS ** 3 * mS ** 2 * theta_p ** 2 + 2 * np.cos(theta) * np.sin(theta) * g * lS ** 2 * mS ** 2 + 4 * IzzS * np.sin(theta) * lS * mS * theta_p ** 2 - 2 * dR * lS ** 2 * mS * s_p + 2 * fe * lS ** 2 * mS - 8 * IzzS * dR * s_p + 8 * IzzS * fe) / 2
+
+    dx[:,3] = -(np.cos(theta) * np.sin(theta) * lS * mS * theta_p ** 2 - 2 * np.cos(theta) * dR * s_p + 2 * np.sin(theta) * g * mS + 2 * np.sin(theta) * g * mW + 2 * np.cos(theta) * fe) * lS * mS / (-np.cos(theta) ** 2 * lS ** 2 * mS ** 2 + lS ** 2 * mS ** 2 + lS ** 2 * mS * mW + 4 * IzzS * mS + 4 * IzzS * mW)
+
     
     return dx
 
@@ -97,7 +100,7 @@ def optimization_problem(x0, xf, N):
     # Initial guess for states
     x_init = np.zeros((N+1, states_dim))
     x_init[:, 0] = np.linspace(x0[0], xf[0], N+1)
-    x_init[:, 1] = np.linspace(0, np.pi, N+1)
+    x_init[:, 1] = np.linspace(x0[1], xf[1], N+1)
     # Concatenate control inputs and states into a single decision variable
     initial_guess = np.concatenate([u_init, x_init.flatten()])
     
@@ -109,24 +112,24 @@ def optimization_problem(x0, xf, N):
         
         return obj_value
     
-    # Define the bounds for the decision variables
-    bounds = [(-20, 20)] * N 
+    # Define the bounds for the decision variables (system input)
+    bounds = [(u_min, u_max)] * N 
     state_bounds = [(None, None)] * (states_dim * (N+1))
 
     for i in range(0,N+1):
-        state_bounds[4*i] = (l_b,u_b)
+        state_bounds[states_dim*i] = (l_b,u_b)
 
     bounds = bounds + state_bounds    
 
     #Enforcing Bound constraint on initial and final states
-    bounds[10] = (0.0,0.0)
-    bounds[11] = (0.0,0.0)
-    bounds[12] = (0.0, 0.0)
-    bounds[13] = (0.0,0.0)
-    bounds[50] = (1.0,1.0)
-    bounds[51] = (np.pi,np.pi)
-    bounds[52] = (0.0,0.0)
-    bounds[53] = (0.0,0.0)
+    bounds[N] =     (x0[0], x0[0])
+    bounds[N+1] =   (x0[1], x0[1])
+    bounds[N+2] =   (x0[2], x0[2])
+    bounds[N+3] =   (x0[3], x0[3])
+    bounds[5*N] =   (xf[0], xf[0])
+    bounds[5*N+1] = (xf[1], xf[1])
+    bounds[5*N+2] = (xf[2], xf[2])
+    bounds[5*N+3] = (xf[3], xf[3])
 
     # Define the constraints
     constraints = [{'type': 'eq', 'fun': dynamics_defects_theta},
@@ -135,159 +138,128 @@ def optimization_problem(x0, xf, N):
                    {'type': 'eq', 'fun': dynamics_defects_theta_dot},]
     
     # Solve the optimization problem
-    result = minimize(problem, initial_guess, method='SLSQP', bounds=bounds, constraints=constraints)
+    result = minimize(problem, initial_guess, method='SLSQP', bounds=bounds, constraints=constraints, 
+                      options={'maxiter': 1000, 'disp': True})
     
     return result
 
 # Define the initial and final states 
-x0 = [0.0, 0.0, 0.0, 0.0]  # initial position and velocity
-xf = [1, np.pi, 0.0, 0.0]  # final position and velocity
-states_dim = 4
-
+case = 1
+if case == 1:
+    # swingup
+    x0 = [0.0, 0.0, 0.0, 0.0]  # initial position and velocity
+    xf = [0.0, np.pi, 0.0, 0.0]  # final position and velocity
+    filename = 'swingup'
+    T = 8 # end time
+    N = 80
+if case == 2:
+    # swingdown
+    x0 = [0.0, np.pi, 0.0, 0.0]  # initial position and velocity
+    xf = [0.0, 0.0, 0.0, 0.0]  # final position and velocity
+    filename = 'swingdown'
+    T = 5 # end time
+    N = 80
+if case == 3:
+    # sidestep, low, right
+    x0 = [0.0, 0.0, 0.0, 0.0]  # initial position and velocity
+    xf = [1.0, 0.0, 0.0, 0.0]  # final position and velocity
+    filename = 'sidestep_low_right'
+    T = 2 # end time
+    N = 80
+if case == 4:
+    # sidestep, low, left
+    x0 = [1.0, 0.0, 0.0, 0.0]  # initial position and velocity
+    xf = [0.0, 0.0, 0.0, 0.0]  # final position and velocity
+    filename = 'sidestep_low_left'
+    T = 2 # end time
+    N = 80
+if case == 5:
+    # sidestep, up, right
+    x0 = [0.0, np.pi, 0.0, 0.0]  # initial position and velocity
+    xf = [1.0, np.pi, 0.0, 0.0]  # final position and velocity
+    filename = 'sidestep_up_right'
+    T = 2 # end time
+    N = 80
+if case == 6:
+    # sidestep, up, left
+    x0 = [1.0, np.pi, 0.0, 0.0]  # initial position and velocity
+    xf = [0.0, np.pi, 0.0, 0.0]  # final position and velocity
+    filename = 'sidestep_up_left'
+    T = 2 # end time
+    N = 80
 
 # Define the constants
-l = 0.5
-m1 = 1
-m2 = 0.3
-g = 9.81
-T = 2
+lS = 1.0 # length of the pendulum
+wS = 0.02 # width of the pendulum
+mW = 10.0 # mass of the cart
+mS = lS*wS*wS*2750 # mass of the pendulum
+g = 9.81 # acceleration due to gravity
+IzzS = 1/12*mS*(wS*wS+lS*lS) # moment of inertia of the pendulum about its center of mass
+dR = 0.3 # viscous friction coefficient
+print("Pendulum: m2 = {:.3f}, J = {:.3f}".format(mS, IzzS))
+states_dim = 4
 
 #bounds
-u_b = 5
-l_b = -5
+u_b = 50
+l_b = -50
+u_min = -100
+u_max = 100
 
 # Define the number of time steps
-N = 10
 t = np.linspace(0, T, N+1)  # time grid
 dt = t[1] - t[0]  # time step
 
 # Solve the optimization problem
 result = optimization_problem(x0, xf, N)
 
-# Extract the optimal control inputs and states
-u_opt = result.x[:N]
+if result is not None and result.success:
+    # Extract the optimal control inputs and states
+    u_opt = result.x[:N]
 
-x_opt = result.x[N:].reshape((N+1, states_dim))
+    x_opt = result.x[N:].reshape((N+1, states_dim))
 
-# Print the optimal control inputs and states
-print("Optimal control inputs:")
-print(u_opt)
-print("Optimal states:")
-print(x_opt)
+    # Print the optimal control inputs and states
+    print("Optimal control inputs:")
+    print(u_opt)
+    print("Optimal states:")
+    print(x_opt)
 
-# Plotting control variables
-plt.figure(figsize=(8, 6))
-plt.plot(t[:-1], u_opt, 'bo-')
-plt.xlabel('Time')
-plt.ylabel('Control Input')
-plt.title('Optimal Control Inputs')
-plt.grid(True)
-plt.show()
+    # Plotting control variables
+    plt.figure(figsize=(8, 6))
+    plt.plot(t[:-1], u_opt, 'bo-')
+    plt.xlabel('Time')
+    plt.ylabel('Control Input')
+    plt.title('Optimal Control Inputs')
+    plt.grid(True)
+    plt.show()
 
-df = pd.DataFrame(u_opt)  
+    # Plotting state variables
+    t_ = np.linspace(0, T, N+1)  # time grid
 
-# Export the DataFrame to a CSV file
-df.to_csv('control_data.csv', index=False)
+    plt.figure(figsize=(8, 6))
+    plt.plot(t_, x_opt[:, 0], label='Position')
+    plt.plot(t_, x_opt[:, 1], label='Theta')
+    plt.plot(t_, x_opt[:, 2], label='Velocity')
+    plt.plot(t_, x_opt[:, 3], label='Theta_dot')
+    plt.xlabel('Time')
+    plt.ylabel('State')
+    plt.title('Optimal State Variables')
+    plt.legend()
+    plt.grid(True)
+    plt.show()
 
-
-# Plotting state variables
-t_ = np.linspace(0, T, N+1)  # time grid
-
-plt.figure(figsize=(8, 6))
-plt.plot(t_, x_opt[:, 0], label='Position')
-plt.plot(t_, x_opt[:, 1], label='Theta')
-plt.plot(t_, x_opt[:, 2], label='Velocity')
-plt.plot(t_, x_opt[:, 3], label='Theta_dot')
-plt.xlabel('Time')
-plt.ylabel('State')
-plt.title('Optimal State Variables')
-plt.legend()
-plt.grid(True)
-plt.show()
-
-cs = CubicSpline(t_, x_opt[:, 0])
-
-# Generate values for plotting
-x_plot = np.linspace(0, 2, 100)
-y_plot = cs(x_plot)
-
-# Plot the cubic spline
-plt.figure(figsize=(8, 6))
-plt.plot(t_, x_opt[:, 0], label='Position')
-plt.plot(x_plot, y_plot, label='Position Spline')
-plt.xlabel('X')
-plt.ylabel('Y')
-plt.title('Theta Spline Interpolation')
-plt.legend()
-plt.grid(True)
-plt.show()
-# Create a DataFrame from the spline data
-df = pd.DataFrame(y_plot)  
-
-# Export the DataFrame to a CSV file
-df.to_csv('pos_spline_data.csv', index=False)
+    cs = CubicSpline(t_, x_opt[:, 0])
 
 
-cs = CubicSpline(t_, x_opt[:, 1])
-x_plot = np.linspace(0, 2, 100)
-y_plot = cs(x_plot)
-
-# Plot the cubic spline
-plt.figure(figsize=(8, 6))
-plt.plot(t_, x_opt[:, 1], label='Theta')
-plt.plot(x_plot, y_plot, label='theta Spline')
-plt.xlabel('X')
-plt.ylabel('Y')
-plt.title('Theta Spline Interpolation')
-plt.legend()
-plt.grid(True)
-plt.show()
-
-df = pd.DataFrame(y_plot, columns=['t'])  
-
-# Export the DataFrame to a CSV file
-df.to_csv('theta_spline_data.csv', index=False)
-
-cs = CubicSpline(t_, x_opt[:, 2])
-x_plot = np.linspace(0, 2, 100)
-y_plot = cs(x_plot)
-
-# Plot the cubic spline
-plt.figure(figsize=(8, 6))
-plt.plot(t_, x_opt[:, 2], label='velocity')
-plt.plot(x_plot, y_plot, label='velocity Spline')
-plt.xlabel('X')
-plt.ylabel('Y')
-plt.title('Velocity Spline Interpolation')
-plt.legend()
-plt.grid(True)
-plt.show()
-
-df = pd.DataFrame(y_plot)  
-
-# Export the DataFrame to a CSV file
-df.to_csv('velocity_spline_data.csv', index=False)
-
-cs = CubicSpline(t_, x_opt[:, 3])
-x_plot = np.linspace(0, 2, 100)
-y_plot = cs(x_plot)
-
-# Plot the cubic spline
-plt.figure(figsize=(8, 6))
-plt.plot(t_, x_opt[:, 3], label='angular velocity')
-plt.plot(x_plot, y_plot, label='angular velocity Spline')
-plt.xlabel('X')
-plt.ylabel('Y')
-plt.title('Angular Velocity Spline Interpolation')
-plt.legend()
-plt.grid(True)
-plt.show()
-
-df = pd.DataFrame(y_plot)  
-
-# Export the DataFrame to a CSV file
-df.to_csv('angular_velocity_spline_data.csv', index=False)
-
-
-
-
+    # Export the DataFrame to a CSV file
+    df_x = pd.DataFrame(x_opt, columns=['Position', 'Theta', 'Velocity', 'Theta_dot'])
+    # Create a new DataFrame from u_opt
+    df_u = pd.DataFrame(u_opt, columns=['u'])
+    # Create a new DataFrame from t
+    df_t = pd.DataFrame(t_, columns=['t'])
+    # Concatenate the new DataFrame with the existing one
+    df = pd.concat([df_t, df_x, df_u], axis=1)
+    # Export the DataFrame to a CSV file
+    df.to_csv('{}.csv'.format(filename), index=False)
+else:
+    print("Optimization failed: {}", result.message)
